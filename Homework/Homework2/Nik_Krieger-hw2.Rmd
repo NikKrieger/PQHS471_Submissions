@@ -1,0 +1,377 @@
+---
+title: "Homework2"
+author: "Nik Krieger"
+date: "`r Sys.Date()`"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load_libraries, message=FALSE, warning=FALSE}
+library(MASS)
+library(boot)
+library(ISLR)
+library(glmnet)
+library(pls)
+library(leaps)
+```
+
+# Week 4 Exercises:
+
+## Chapter 5 - Exercise 9
+
+#### Task (a)
+
+The estimate for the population mean of `medv` is the sample mean of `medv`:
+
+```{r ch5_ex9_task_a}
+mean(Boston$medv)
+```
+
+### Task (b)
+
+The estimate for the population mean of `medv` is the sample standard deviation of `medv` divided by the square root of the sample size of `medv`.
+
+```{r ch5_ex9_task_b}
+sd(Boston$medv) / sqrt(length(Boston$medv))
+```
+
+This means that our estimate of the population mean of `medv` will differ from the true mean by an average of $408.86.
+
+### Task (c)
+
+Here is a bootstrap procedure to estimate the standard error of the population mean estimate (i.e., the sample mean) of `medv`.
+
+```{r ch5_ex9_task_c}
+mean.function = function(data.vector, indices)
+                return(mean(data.vector[indices]))
+
+set.seed(0)
+boot(data = Boston$medv, statistic = mean.function, R=1000)
+```
+
+The bootstrap procedure yielded a standard error of 0.3982063, which is only slightly less than the conventionally calculated value of 0.4088611.
+
+### Task (d)
+
+Here is a calculated 95% confidence interval for the mean of `medv` using the standard error that the bootstrap procedure yielded (0.3982063), followed by the results of a t-test procedure performed on `medv`.
+
+```{r ch5_ex9_task_d}
+conf.lower = mean(Boston$medv) - 2*0.3982063
+conf.upper = mean(Boston$medv) + 2*0.3982063
+
+conf.lower
+conf.upper
+
+t.test(Boston$medv)
+```
+
+The calculated confidence interval is about (21.736, 23.329), while the t-test procedure yielded a trivially wider confidence interval of (21.729, 23.336)
+
+### Task (e)
+
+The estimate for the population median of `medv` is the sample median of `medv`:
+
+```{r ch5_ex9_task_e}
+median(Boston$medv)
+``` 
+
+### Task (f)
+
+Here is a bootstrap procedure to estimate the standard error of the population median estimate (i.e., the sample mean) of `medv`.
+
+```{r ch5_ex9_task_f}
+median.function = function(data.vector, indices)
+                  return(median(data.vector[indices]))
+
+set.seed(0)
+boot(data = Boston$medv, statistic = median.function, R=1000)
+```
+
+The procedure yielded an estimate of 0.3616119. This seems to be a notable degree lower than the standard error of the mean.
+
+### Task (g)
+
+The estimate for the population tenth percentile of `medv` is the sample tenth percentile of `medv`:
+
+```{r ch5_ex9_task_g}
+quantile(Boston$medv, 0.1)
+``` 
+
+### Task (h)
+
+```{r ch5_ex9_task_h}
+q10.function = function(data.vector, indices)
+                  return(quantile(data.vector[indices], 0.1))
+
+set.seed(0)
+boot(data = Boston$medv, statistic = q10.function, R=1000)
+```
+
+The procedure yielded an estimate of 0.4990659. This is markedly higher than the standard errors of the mean and median.
+
+
+# Week 5 Exercises
+
+## Chapter 6 - Exercise 9
+
+### Task (a)
+
+First we split the data into a training and test sample (80/20).
+
+```{r ch6_ex9_taska}
+set.seed(0)
+training.indices = sample(dim(College)[1], dim(College)[1]*0.8)
+
+College.train = College[training.indices,]
+College.test = College[-training.indices,]
+```
+
+### Task (b)
+
+Here we fit a linear model with the training data, predicting the number of applications received based on all other variables in the data set.
+
+We then use this model to make predictions on the test data, and report the mean squared error (MSE).
+
+```{r ch6_ex9_taskb}
+lm.model = lm(Apps ~ ., data = College.train)
+
+lm.test.pred = predict(lm.model, College.test)
+
+mean((College.test$Apps - lm.test.pred)^2)
+```
+
+### Task (c)
+
+We will now fit a ridge regression model with a lambda chosen by cross-validation. The mean square error is reported.
+
+```{r ch6_ex9_taskc}
+train.matrix = model.matrix(Apps ~ ., College.train)[,-1]
+ test.matrix = model.matrix(Apps ~ ., College.test)[,-1]
+
+ridge.model = glmnet(train.matrix, College.train$Apps, alpha=0, lambda=10^seq(10, -2, length=100))
+
+set.seed(0)
+ridge.model.cv = cv.glmnet(train.matrix, College.train$Apps, alpha=0, lambda=10^seq(10, -2, length=100))
+
+ridge.test.pred = predict(ridge.model, s=ridge.model.cv$lambda.min, newx=test.matrix)
+mean((ridge.test.pred - College.test$Apps)^2)
+```
+
+### Task (d)
+
+We will now fit a lasso model with a lambda chosen by cross-validation. The mean square error is reported.
+
+```{r ch6_ex9_taskd}
+train.matrix = model.matrix(Apps ~ ., College.train)[,-1]
+ test.matrix = model.matrix(Apps ~ .,  College.test)[,-1]
+
+lasso.model = glmnet(train.matrix, College.train$Apps, alpha=1, lambda=10^seq(10, -2, length=100))
+
+set.seed(0)
+lasso.model.cv = cv.glmnet(train.matrix, College.train$Apps, alpha=1, lambda=10^seq(10, -2, length=100))
+
+lasso.test.pred = predict(lasso.model, s=lasso.model.cv$lambda.min, newx=test.matrix)
+mean((lasso.test.pred - College.test$Apps)^2)
+
+predict(lasso.model, type="coefficients", s=lasso.model.cv$lambda.min)
+```
+
+All 17 predictors have non-zero coefficients.
+
+### Task (e)
+
+```{r ch6_ex9_taske_part1}
+set.seed(0)
+pcr.model = pcr(Apps ~ ., data=College.train, scale=TRUE, validation="CV")
+summary(pcr.model)
+
+validationplot(pcr.model, val.type="MSEP")
+```
+
+The lowest MSE produced by cross-validation is 1223^2^ = 1495729, using all 17 principal components, but this is just regression. The more helpful minimum MSE is 1557^2^=2424249, using M=10.
+
+So we declare that cross-validation picks M=10, and we will compute the test error using all `ncomp=10`.
+
+```{r ch6_ex9_taske_part2}
+pcr.test.pred = predict(pcr.model, College.test, ncomp=10)
+mean((pcr.test.pred - College.test$Apps)^2)
+```
+
+### Task (f)
+
+```{r ch6_ex9_taskf_part1}
+set.seed(0)
+pls.model = plsr(Apps ~ ., data=College.train, scale=TRUE, validation="CV")
+summary(pls.model)
+
+validationplot(pls.model, val.type="MSEP")
+```
+
+The lowest MSE produced by cross-validation is 1222^2^ = 1493284, using 13 principal components.
+
+So cross-validation picks M=13, and we will compute the test error using `ncomp=13`.
+
+```{r ch6_ex9_taskf_part2}
+pls.test.pred = predict(pls.model, College.test, ncomp=13)
+mean((pls.test.pred - College.test$Apps)^2)
+```
+
+### Task (g)
+
+We seem not to be able to predict the number of college applications very well. All test errors are around 948000, with the lasso model doing the best with a test MSE of 947313.9. The PCR model did not successfully reduce dimensionality, so it's result was much poorer, producing a test MSE of 1528997. Other than that, there isn't that much difference.
+
+
+## Chapter 6 - Exercise 11
+
+### Task (a)
+
+#### Create training and test samples
+First we split the data into a training and test sample (80/20).
+
+```{r ch6_ex11_taska_1}
+set.seed(0)
+training.indices = sample(dim(Boston)[1], dim(Boston)[1]*0.8)
+
+Boston.train = Boston[training.indices,]
+Boston.test = Boston[-training.indices,]
+```
+
+#### Linear Model
+
+Here we fit a linear model with the training data, predicting towns' per capita crime rate based on all other variables in the data set.
+
+We then use this model to make predictions on the test data, and report the mean squared error (MSE).
+
+```{r ch6_ex11_taska_2}
+lm.model = lm(crim ~ ., data = Boston.train)
+
+lm.test.pred = predict(lm.model, Boston.test)
+
+mean((Boston.test$crim - lm.test.pred)^2)
+```
+
+#### Ridge Regression Model
+
+We will now fit a ridge regression model with a lambda chosen by cross-validation. The mean square error is reported.
+
+```{r ch6_ex11_taska_3}
+train.matrix = model.matrix(crim ~ ., Boston.train)[,-1]
+ test.matrix = model.matrix(crim ~ ., Boston.test)[,-1]
+
+ridge.model = glmnet(train.matrix, Boston.train$crim, alpha=0, lambda=10^seq(10, -2, length=100))
+
+set.seed(0)
+ridge.model.cv = cv.glmnet(train.matrix, Boston.train$crim, alpha=0, lambda=10^seq(10, -2, length=100))
+
+ridge.test.pred = predict(ridge.model, s=ridge.model.cv$lambda.min, newx=test.matrix)
+mean((ridge.test.pred - Boston.test$crim)^2)
+```
+
+#### Lasso method
+
+We will now fit a lasso model with a lambda chosen by cross-validation. The mean square error is reported.
+
+```{r ch6_ex11_taska_4}
+train.matrix = model.matrix(crim ~ ., Boston.train)[,-1]
+ test.matrix = model.matrix(crim ~ .,  Boston.test)[,-1]
+
+lasso.model = glmnet(train.matrix, Boston.train$crim, alpha=1, lambda=10^seq(10, -2, length=100))
+
+set.seed(0)
+lasso.model.cv = cv.glmnet(train.matrix, Boston.train$crim, alpha=1, lambda=10^seq(10, -2, length=100))
+
+lasso.test.pred = predict(lasso.model, s=lasso.model.cv$lambda.min, newx=test.matrix)
+mean((lasso.test.pred - Boston.test$crim)^2)
+```
+
+#### PCR method
+
+```{r ch6_ex11_taska_5}
+set.seed(0)
+pcr.model = pcr(crim ~ ., data=Boston.train, scale=TRUE, validation="CV")
+summary(pcr.model)
+
+validationplot(pcr.model, val.type="MSEP")
+```
+
+The lowest MSE produced by cross-validation is 6.68^2^ = 44.6224 uses all 13 principal components, but that is just regression. The next lowest MSE, however, uses M=8 and is 6.728^2^ = 45.266.
+
+So we declare that cross-validation picks M=8, and we will compute the test error using all `ncomp=8`.
+
+```{r ch6_ex11_taska_6}
+pcr.test.pred = predict(pcr.model, Boston.test, ncomp=8)
+mean((pcr.test.pred - Boston.test$crim)^2)
+```
+
+#### PLSR method
+
+```{r ch6_ex11_taska_7}
+set.seed(0)
+pls.model = plsr(crim ~ ., data=Boston.train, scale=TRUE, validation="CV")
+summary(pls.model)
+
+validationplot(pls.model, val.type="MSEP")
+```
+
+The lowest MSE produced by cross-validation is 6.68^2^ = 44.6224, using 10 or more principal components.
+
+So cross-validation picks M=10, and we will compute the test error using `ncomp=10`.
+
+```{r ch6_ex11_taska_8}
+pls.test.pred = predict(pls.model, Boston.test, ncomp=10)
+mean((pls.test.pred - Boston.test$crim)^2)
+```
+
+We will now use a best subset selection procedure, allowing the algorithm to consider models with up to 13 predictors.
+
+```{r ch6_ex11_taska_12}
+# The regsubsets predict function, courtesy of ISLR
+predict.regsubsets =function(object, newdata, id,...){
+  form = as.formula(object$call[[2]])
+  mat = model.matrix(form, newdata)
+  coefi = coef(object, id=id)
+  xvars = names(coefi)
+  mat[,xvars]%*%coefi
+}
+
+k=10
+set.seed(0)
+folds = sample(1:k, nrow(Boston), replace=TRUE)
+cv.errors = matrix(NA, k, 13, dimnames=list(NULL, paste(1:13)))
+
+for(j in 1:k){
+  best.fit = regsubsets(crim ~ ., data=Boston[folds!=j,], nvmax=13)
+  for(i in 1:13){
+    pred=predict(best.fit, Boston[folds==j,], id=i)
+    cv.errors[j,i]= mean((Boston$crim[folds==j] - pred)^2)
+  }
+}
+
+mean.cv.errors=apply(cv.errors, 2, mean)
+mean.cv.errors
+
+par(mfrow=c(1,1))
+plot(mean.cv.errors, type='b')
+```
+
+Cross-validation selects a 9-variable model, which yields a mean cross-validation error of 39.09773.
+
+### Task (b)
+
+Here is a summary of the test MSEs produced by the different methods we used:
+
+40.89623 Linear model
+41.07925 Ridge regression
+40.91244 Lasso method
+42.70996 PCR method
+40.87073 PLS method
+39.09773 Best subsets method 
+
+All methods produced MSEs around 40. The PCR method is marginally worse, and the Best subsets method is marginally the best. My final choice would be the model produced by the best subsets method because it has the best MSE and is the most interpretable. 
+
+### Task (c)
+
+My choice only uses 9 of the 13 available predictors because the other 4 proved not to be helpful after cross-validation. In other words, when models containing these extraneous predictors were tested, they proved not to be informative for the `crim` variable--predictions that used more than 9 variables actually had higher test MSE.

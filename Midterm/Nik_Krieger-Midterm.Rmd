@@ -1,0 +1,466 @@
+---
+title: "471 Midterm"
+author: "Nik Krieger"
+date: "`r Sys.Date()`"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load_libraries, message=FALSE, warning=FALSE}
+library(class)
+library(rms)
+library(MASS)
+library(tidyverse)
+```
+
+We will import the raw data from the .csv file and immediately make a copy that we will work with.
+
+```{r get_data, message=FALSE, warning=FALSE}
+census_train_raw = read_csv("census_train.csv")
+census_train = census_train_raw
+Hmisc::describe(census_train)
+```
+
+The `Hmisc::describe()` function reports no missing data, but the categorical variables `workclass`, `occupation`, and `native.country` each contain a level named `?`. We will flag these values as missing data and then check to see how much missingness there is. Below is the number of rows with mising values and the percentage of rows with missing values.
+
+```{r flag_missingness}
+census_train[census_train == "?"] <- NA
+
+nrow(census_train) - nrow(na.omit(census_train))
+(nrow(census_train) - nrow(na.omit(census_train)))/nrow(census_train)
+
+Hmisc::describe(census_train)
+```
+
+Only just over 7% of the observations contain a missing value, so we will omit these observations
+
+```{r remove_missingness}
+census_train <- census_train %>% na.omit
+```
+
+Here is a cross-table of `education` and `education-num`:
+
+```{r education_cross_table}
+table(census_train$education, census_train$`education-num`)
+```
+
+Clearly, the variables `education` and `education-num` contain the same data in different formats, so we will ignore `education-num`.
+
+Here is a cross-table of `marital-status` and `relationship`:
+
+```{r relationship_marital_status_cross_table}
+table(census_train$`marital-status`, census_train$relationship)
+```
+
+Clearly, there is some kind of redundancy here. Since `marital-status` is intuitive and `relationship` is decidedly not, we will drop `relationship`.
+
+Here we turn character variables into factors and change hyphens in variable names to periods. We'll also create a numerical version of `income`.
+
+```{r recode_data_as_factors}
+census_train <- census_train %>% 
+  mutate(workclass = as.factor(workclass), education = as.factor(education),
+         marital.status = as.factor(`marital-status`), occupation = as.factor(occupation),
+         race = as.factor(race), sex = as.factor(sex), capital.gain = `capital-gain`,
+         capital.loss = `capital-loss`, hours.per.week = `hours-per-week`,
+         native.country = as.factor(`native-country`), income = as.factor(income),
+         income.num = ifelse(income==">50K", 1, 0)) %>% 
+  select(age, workclass, fnlwgt, education, marital.status, occupation, race, sex, 
+         capital.gain, capital.loss, hours.per.week, native.country, income, income.num) 
+```
+
+We'll now look at numerical summaries and histograms of the quantitative predictors:
+
+```{r histograms}
+census_train %>% select(age, fnlwgt, capital.gain, capital.loss, hours.per.week) %>%
+  Hmisc::describe()
+ggplot(data=census_train, aes(x=age)) +
+  geom_histogram()
+ggplot(data=census_train, aes(x=fnlwgt)) +
+  geom_histogram()
+ggplot(data=census_train, aes(x=capital.gain)) +
+  geom_histogram()
+ggplot(data=census_train, aes(x=capital.loss)) +
+  geom_histogram()
+ggplot(data=census_train, aes(x=hours.per.week)) +
+  geom_histogram()
+```
+
+All values seem to make sense and be in a normal range. The only strange one is the maximum `capital.gain` value of 99999. It is nearly three times higher than the next highest value of 34095, but I am not convinced that it is a mistake or a missingness indicator. I have a feeling that it was censored for the sake of privacy. We will keep this value since it is a meaningful stand-in for subjects who make lots of money in capital gains.
+
+Now we'll look at bar graphs of the categorical predictors as well as the outcome variable `income`.
+
+```{r bar_graphs}
+census_train %>% select(workclass, education, marital.status, occupation, 
+                        race, sex, native.country, income) %>%
+  Hmisc::describe()
+
+ggplot(data=census_train, aes(x=workclass)) +
+  geom_bar() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+ggplot(data=census_train, aes(x=education)) +
+  geom_bar() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+ggplot(data=census_train, aes(x=marital.status)) +
+  geom_bar() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+ggplot(data=census_train, aes(x=occupation)) +
+  geom_bar() +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+ggplot(data=census_train, aes(x=race)) +
+  geom_bar()
+ggplot(data=census_train, aes(x=sex)) +
+  geom_bar()
+ggplot(data=census_train, aes(x=native.country)) +
+  geom_bar() +
+  theme(axis.text.x = element_text(angle = 50, hjust = 1))
+ggplot(data=census_train, aes(x=income)) +
+  geom_bar()
+```
+
+Concerning the `native.country` variable, the number of people native to the United States dwarfs all other possible values. We will collapse all non-US levels into an "Other" category. 
+
+```{r collapse_native_country}
+census_train <- census_train %>% mutate(
+  native.country = fct_recode(as.factor(native.country),
+                              "USA or Canada" = "United-States", "USA or Canada" = "Canada",
+                              "USA or Canada" = "Outlying-US(Guam-USVI-etc)",
+                              "Europe" = "France", "Europe" = "Italy", "Europe" = "Poland",
+                              "Europe" = "Scotland", "Europe" = "Germany", "Europe" = "Portugal",
+                              "Europe" = "Yugoslavia", "Europe" = "England", "Europe" = "Greece",
+                              "Europe" = "Holand-Netherlands", "Europe" = "Hungary",
+                              "Europe" = "Ireland", "Asia" = "Cambodia", "Asia" = "India",
+                              "Asia" = "Laos", "Asia" = "Thailand", "Asia" = "Vietnam",
+                              "Asia" = "Hong", "Asia" = "Iran", "Asia" = "China",
+                              "Asia" = "Japan", "Asia" = "Philippines", "Asia" = "Taiwan",
+                              "Asia" = "South", "Latin America or Caribbean" = "Columbia",
+                              "Latin America or Caribbean" = "Ecuador",
+                              "Latin America or Caribbean" = "Guatemala",
+                              "Latin America or Caribbean" = "Honduras",
+                              "Latin America or Caribbean" = "Cuba",
+                              "Latin America or Caribbean" = "El-Salvador",
+                              "Latin America or Caribbean" = "Haiti", 
+                              "Latin America or Caribbean" = "Jamaica",
+                              "Latin America or Caribbean" = "Mexico",
+                              "Latin America or Caribbean" = "Peru",
+                              "Latin America or Caribbean" = "Trinadad&Tobago",
+                              "Latin America or Caribbean" = "Dominican-Republic",
+                              "Latin America or Caribbean" = "Nicaragua",
+                              "Latin America or Caribbean" = "Puerto-Rico"))
+
+ggplot(data=census_train, aes(x=native.country)) +
+  geom_bar()
+```
+
+Concerining the `marital.status` variable, we will collapse the trivial distinctions of `Married-AF-spouse` and `Married-civ-spouse` into a single category called `Married`.
+
+```{r collapse_marital_status}
+census_train <- census_train %>% mutate(
+  marital.status = fct_recode(as.factor(marital.status),
+                              "Married" = "Married-AF-spouse", "Married" = "Married-civ-spouse"),
+  marital.status = fct_relevel(marital.status, "Married", "Married-spouse-absent", "Separated",
+                               "Divorced", "Widowed"))
+
+ggplot(data=census_train, aes(x=marital.status)) +
+  geom_bar()
+```
+
+Concerning `workclass`, below we will verify that all 10 individuals in the `Without-pay` category do not make more than $50,000, and then remove them since they are so few and obviously not relevant to the prediction task at hand (i.e., people who have never worked cannot make more than zero dollars).
+
+```{r remove_never_worked}
+census_train %>% filter(workclass == "Without-pay") %>% select(income)
+census_train <- census_train %>% filter(workclass != "Without-pay")
+census_train <- census_train %>% droplevels()
+```
+
+Concerning `education`, we will group together all subjects who seem not to have graduated high school or completed any college into a level called `Less than HS grad`.
+
+```{r}
+census_train <- census_train %>% mutate(
+  education = fct_collapse(as.factor(education),
+                              "Less than HS grad" = c("Preschool", "1st-4th", "5th-6th", "7th-8th",
+                                                      "9th", "10th", "11th", "12th")),
+  education = fct_relevel(education, "Less than HS grad", "HS-grad", "Some-college", "Assoc-voc",
+                          "Assoc-acdm", "Bachelors", "Masters", "Prof-school", "Doctorate"))
+ggplot(data=census_train, aes(x=education)) +
+  geom_bar() +
+  theme(axis.text.x = element_text(angle = 10, hjust = 1))
+```
+
+We will now inspect the `income` value of the six subjects whose `occupation` value is `Armed-Forces`:
+
+```{r occupation}
+census_train %>% filter(occupation == "Armed-Forces") %>% select(income)
+```
+
+We see that they are not all the same, and because this level does not easily collapse into any other level in `occupation`, we will keep this level as-is.
+
+We will now look at a scatterplot matrix of the quantitative predictors along with the outcome:
+
+```{r scatterplot_matrix_quantitative}
+GGally::ggpairs(dplyr::select(census_train, age, fnlwgt,
+                              capital.gain,
+                              capital.loss, hours.per.week, income),
+                title = "Scatterplot Matrix for Census data",
+                cardinality_threshold = 41)
+```
+
+There do not seem to be any concerning trends.
+
+Now we're going to look at tables of each categorical variable with the income variable.
+
+```{r scatterplot_matrix_qualitative}
+table(census_train$workclass, census_train$income)
+table(census_train$education, census_train$income)
+table(census_train$marital.status, census_train$income)
+table(census_train$occupation, census_train$income)
+table(census_train$race, census_train$income)
+table(census_train$sex, census_train$income)
+table(census_train$native.country, census_train$income)
+```
+
+No categorical variable seems determinative of income.
+
+We now wish to build a model to predict whether or not a subject's income is above $50,000 per year (presumably). In order to validate our model, we will further split `census_training` into a training sample (80% of the data) and a query sample (20% of the data).
+
+```{r split_training_query}
+census_train$id <- 1:nrow(census_train)
+
+set.seed(0)
+census_query <- census_train %>% sample_n(nrow(census_train)/5)
+
+census_train <- anti_join(census_train, census_query, "id")
+```
+
+We use the kitchen sink model for logistic regression first.
+
+```{r logistic_regression1}
+log.reg1 = glm((income == ">50K") ~ 
+                 
+                 # Quantitative
+                 age + fnlwgt + capital.gain + capital.loss + hours.per.week +
+                 
+                 # Qualitative
+                 sex + race + marital.status + native.country + workclass + 
+                 education + occupation,
+                data=census_train, family=binomial)
+summary(log.reg1)
+
+log.reg.probabilities1 = predict(log.reg1, census_query, type="response")
+log.reg.predictions1 = ifelse(log.reg.probabilities1 > 0.5, ">50K", "<=50K")
+mean(log.reg.predictions1 != census_query$income)
+```
+
+Now we'll do LDA
+
+```{r LDA1}
+lda1 = lda((income == ">50K") ~ age + workclass + fnlwgt + education + 
+                    marital.status + occupation + race + sex + capital.gain + 
+                    capital.loss + hours.per.week + native.country, data=census_train)
+
+lda.predictions.text1 = predict(lda1, census_query)
+lda.predictions1 = ifelse(lda.predictions.text1$class == "TRUE", ">50K", "<=50K")
+
+mean(lda.predictions1 != census_query$income)
+```
+
+```{r KNN}
+train.X = cbind(census_train$age, census_train$workclass, census_train$fnlwgt, 
+                census_train$education, census_train$marital.status, 
+                census_train$occupation, census_train$race, census_train$sex,
+                census_train$capital.gain, census_train$capital.loss,
+                census_train$hours.per.week, census_train$native.country)
+query.X = cbind(census_query$age, census_query$workclass, census_query$fnlwgt, 
+                census_query$education, census_query$marital.status, 
+                census_query$occupation, census_query$race, census_query$sex,
+                census_query$capital.gain, census_query$capital.loss,
+                census_query$hours.per.week, census_query$native.country)
+
+set.seed(1)
+knn1 = knn(train.X, query.X, census_train$income.num, k = 1)
+mean(knn1 != census_query$income.num)
+```
+
+This procedure has also yielded 18.2% test error. We'll try a series of KNN procedures with different values for k: 3, 10, 50, and 100.
+
+```{r KNN_2_T}
+set.seed(3)
+knn3 = knn(train.X, query.X, census_train$income.num, k = 3)
+mean(knn3 != census_query$income.num)
+
+set.seed(5)
+knn5 = knn(train.X, query.X, census_train$income.num, k = 5)
+mean(knn5 != census_query$income.num)
+
+set.seed(10)
+knn10 = knn(train.X, query.X, census_train$income.num, k = 10)
+mean(knn10 != census_query$income.num)
+
+set.seed(50)
+knn50 = knn(train.X, query.X, census_train$income.num, k = 50)
+mean(knn50 != census_query$income.num)
+
+set.seed(100)
+knn100 = knn(train.X, query.X, census_train$income.num, k = 100)
+mean(knn100 != census_query$income.num)
+```
+
+The KNN method has a much higher error rate in its classification when compared to logistic regression and LDA. We'll look at those:
+
+
+```{r logistic_regression2}
+log.reg2 = glm((income == ">50K") ~ 
+                 
+                 # Quantitative
+                 rcs(age, 5) + rcs(fnlwgt, 5) + rcs(capital.gain, 5) +
+                 rcs(capital.loss, 5) + rcs(hours.per.week, 5) + 
+                 
+                 # Qualitative
+                 sex + race + marital.status + native.country + workclass + 
+                 education + occupation,
+                data=census_train, family=binomial)
+summary(log.reg2)
+
+log.reg.probabilities2 = predict(log.reg2, census_query, type="response")
+log.reg.predictions2 = ifelse(log.reg.probabilities2 > 0.5, ">50K", "<=50K")
+mean(log.reg.predictions2 != census_query$income)
+```
+
+We have improved just a little. It seems like the splines on the `fnlwgt` didn't do much, nor did many of the interactions.
+
+```{r logistic_regression3}
+log.reg3 = glm((income == ">50K") ~ 
+                 
+                 # Quantitative
+                 rcs(age, 5) + rcs(fnlwgt, 3) + rcs(capital.gain, 5) +
+                 rcs(capital.loss, 3) + rcs(hours.per.week, 5) + 
+                 
+                 # Qualitative
+                 sex * race + marital.status + workclass + 
+                 education + occupation +
+               
+                 # Interactions
+                 marital.status %ia% age + workclass %ia% age +
+                 education %ia% age + hours.per.week %ia% workclass + 
+                 hours.per.week %ia% occupation + age %ia% hours.per.week,
+                data=census_train, family=binomial)
+summary(log.reg3)
+
+log.reg.probabilities3 = predict(log.reg3, census_query, type="response")
+log.reg.predictions3 = ifelse(log.reg.probabilities3 > 0.5, ">50K", "<=50K")
+mean(log.reg.predictions3 != census_query$income)
+```
+
+```{r logistic_regression4}
+log.reg4 = glm((income == ">50K") ~ 
+                 
+                 # Quantitative
+                 rcs(age, 5) + fnlwgt + rcs(capital.gain, 5) +
+                 rcs(capital.loss, 5) + rcs(hours.per.week, 5) + 
+                 
+                 # Qualitative
+                 sex * race + marital.status + workclass + 
+                 education + occupation +
+               
+                 # Interactions
+                 marital.status %ia% age + workclass %ia% age +
+                 education %ia% age + hours.per.week %ia% workclass + 
+                 hours.per.week %ia% occupation + age %ia% hours.per.week,
+                data=census_train, family=binomial)
+summary(log.reg4)
+
+log.reg.probabilities4 = predict(log.reg4, census_query, type="response")
+log.reg.predictions4 = ifelse(log.reg.probabilities4 > 0.5, ">50K", "<=50K")
+mean(log.reg.predictions4 != census_query$income)
+```
+
+This gives us the best AIC so far. THe error rate is 14%
+
+Now we'll do LDA with those variables just to investigate the error.
+
+```{r LDA2}
+lda2 = lda((income == ">50K") ~ 
+                 
+                 # Quantitative
+                 rcs(age, 5) + fnlwgt + rcs(capital.gain, 5) +
+                 rcs(capital.loss, 5) + rcs(hours.per.week, 5) + 
+                 
+                 # Qualitative
+                 sex * race + marital.status + workclass + 
+                 education + occupation +
+               
+                 # Interactions
+                 marital.status %ia% age + workclass %ia% age +
+                 education %ia% age + hours.per.week %ia% workclass + 
+                 hours.per.week %ia% occupation + age %ia% hours.per.week, data=census_train)
+lda.predictions.text2 = predict(lda2, census_query)
+lda.predictions2 = ifelse(lda.predictions.text2$class == "TRUE", ">50K", "<=50K")
+
+mean(lda.predictions2 != census_query$income)
+```
+
+We don't get as good test error. We'll go with the fourth logistic regression model.
+
+We're ready to test with the official test data, but first we have to format it.
+
+```{r format_test_data}
+census_test = read_csv("census_test.csv")
+census_test[census_test == "?"] <- NA
+census_test <- census_test %>% 
+  na.omit %>% 
+  mutate(workclass = as.factor(workclass), education = as.factor(education),
+         marital.status = as.factor(`marital-status`), occupation = as.factor(occupation),
+         race = as.factor(race), sex = as.factor(sex), capital.gain = `capital-gain`,
+         capital.loss = `capital-loss`, hours.per.week = `hours-per-week`,
+         native.country = as.factor(`native-country`), income = as.factor(income),
+         income.num = ifelse(income==">50K", 1, 0)) %>% 
+  select(age, workclass, fnlwgt, education, marital.status, occupation, race, sex, 
+         capital.gain, capital.loss, hours.per.week, native.country, income, income.num) %>% 
+  mutate(native.country = fct_recode(as.factor(native.country),
+                              "USA or Canada" = "United-States", "USA or Canada" = "Canada",
+                              "USA or Canada" = "Outlying-US(Guam-USVI-etc)",
+                              "Europe" = "France", "Europe" = "Italy", "Europe" = "Poland",
+                              "Europe" = "Scotland", "Europe" = "Germany", "Europe" = "Portugal",
+                              "Europe" = "Yugoslavia", "Europe" = "England", "Europe" = "Greece",
+                              "Europe" = "Holand-Netherlands", "Europe" = "Hungary",
+                              "Europe" = "Ireland", "Asia" = "Cambodia", "Asia" = "India",
+                              "Asia" = "Laos", "Asia" = "Thailand", "Asia" = "Vietnam",
+                              "Asia" = "Hong", "Asia" = "Iran", "Asia" = "China",
+                              "Asia" = "Japan", "Asia" = "Philippines", "Asia" = "Taiwan",
+                              "Asia" = "South", "Latin America or Caribbean" = "Columbia",
+                              "Latin America or Caribbean" = "Ecuador",
+                              "Latin America or Caribbean" = "Guatemala",
+                              "Latin America or Caribbean" = "Honduras",
+                              "Latin America or Caribbean" = "Cuba",
+                              "Latin America or Caribbean" = "El-Salvador",
+                              "Latin America or Caribbean" = "Haiti", 
+                              "Latin America or Caribbean" = "Jamaica",
+                              "Latin America or Caribbean" = "Mexico",
+                              "Latin America or Caribbean" = "Peru",
+                              "Latin America or Caribbean" = "Trinadad&Tobago",
+                              "Latin America or Caribbean" = "Dominican-Republic",
+                              "Latin America or Caribbean" = "Nicaragua",
+                              "Latin America or Caribbean" = "Puerto-Rico"),
+         marital.status = fct_recode(as.factor(marital.status),
+                              "Married" = "Married-AF-spouse", "Married" = "Married-civ-spouse"),
+         marital.status = fct_relevel(marital.status, "Married", "Married-spouse-absent", "Separated",
+                               "Divorced", "Widowed")) %>% 
+  filter(workclass != "Without-pay") %>%
+  droplevels() %>%
+  mutate(education = fct_collapse(as.factor(education),
+                              "Less than HS grad" = c("Preschool", "1st-4th", "5th-6th", "7th-8th",
+                                                      "9th", "10th", "11th", "12th")),
+         education = fct_relevel(education, "Less than HS grad", "HS-grad", "Some-college", "Assoc-voc",
+                          "Assoc-acdm", "Bachelors", "Masters", "Prof-school", "Doctorate"))
+census_test$id <- 1:nrow(census_test)
+```
+
+```{r logistic_regression_test}
+log.reg.probabilities.test = predict(log.reg4, census_test, type="response")
+log.reg.predictions.test = ifelse(log.reg.probabilities.test > 0.5, ">50K", "<=50K")
+mean(log.reg.predictions.test != census_test$income)
+```
+
+The final test error is 15.4 percent.

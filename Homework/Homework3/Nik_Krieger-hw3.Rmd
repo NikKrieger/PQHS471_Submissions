@@ -1,0 +1,585 @@
+---
+title: "Homework3"
+author: "Nik Krieger"
+date: "`r Sys.Date()`"
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    number_sections: yes
+    df_print: paged
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r load_libraries, message=FALSE, warning=FALSE}
+library(MASS)
+library(boot)
+library(splines)
+library(ISLR)
+library(tree)
+library(randomForest)
+library(caret)
+library(gbm)
+library(e1071)
+```
+
+# Week 6 Exercises:
+
+## Chapter 7 - Exercise 9
+
+### Task a)
+
+Here is the regression output of a cubic polynomial regression using `dis` to predict `nox`:
+
+```{r ch7e9ta_1, message=FALSE, warning=FALSE}
+attach(Boston)
+
+poly.lm = lm(nox ~ poly(dis, 3), data=Boston)
+poly.lm.sum = summary(poly.lm)
+```
+
+Here is a plot of the data with the fitted cubic polynomial curve.
+
+```{r ch7e9ta_2}
+dislims = range(dis)
+dis.grid=seq(from=dislims[1], to=dislims[2])
+preds = predict(poly.lm, newdata=list(dis = dis.grid), se=TRUE)
+
+plot(dis, nox, xlim=dislims, cex =.5, col="darkgrey")
+lines(dis.grid, preds$fit, lwd=2, col="blue")
+```
+
+### Task b)
+
+Here are plots of polynomial fits of degree 1 to 10. The residual sums of squares are at the bottom of each plot.
+
+```{r ch7e9tb_1}
+# Degree=1 is done separately so that the fitted curve would be more visible
+poly.lm = lm(nox ~ poly(dis, 1), data=Boston)
+preds = predict(poly.lm, newdata=list(dis = dis.grid), se=TRUE)
+plot(dis, nox, xlim=dislims, ylim=c(.25, .9), cex =.5, col="darkgrey")
+title("Degree-1 Polynomial Fits on nox~dis data")
+title(sub=paste0("RSS=", sum(poly.lm$residuals^2)))
+lines(dis.grid, preds$fit, lwd=2,col="blue")
+
+for(degree in 2:10){
+  poly.lm = lm(nox ~ poly(dis, degree), data=Boston)
+  preds = predict(poly.lm, newdata=list(dis = dis.grid), se=TRUE)
+  plot(dis, nox, xlim=dislims, cex =.5, col="darkgrey")
+  title(paste0("Degree-", degree, " Polynomial Fits on nox~dis data"))
+  title(sub=paste0("RSS=", sum(poly.lm$residuals^2)))
+  lines(dis.grid, preds$fit, lwd=2,col="blue")
+}
+```
+
+### Task c)
+
+```{r ch7e9tc}
+set.seed(0)
+cv.error = rep(0, 10)
+
+for (degree in 1:10){
+  poly.lm = glm(nox ~ poly(dis, degree), data=Boston)
+  cv.error[degree] = cv.glm(Boston, poly.lm, K=10)$delta[1]
+}
+cv.error
+plot(cv.error)
+```
+
+The models with polynomial degrees 1-6 are basically the same, though the models with polynomial degrees 2-5 are clearly the best. The models with degrees 7-9 have significantly higher cross-validation error. The model with a polynomial degree of 10 is much better than degrees 7-9, but a measure worse than models 1-6.
+
+The model that uses the cubic polynomial yields the lowest cross-validation error at 0.003853017, so we pick that one as the best.
+
+### Task d)
+
+Here is the output for a model using splines with four degrees of freedom. The knots were chosen automatically by `bs()` using suitable quantiles.
+
+```{r ch7e9td}
+splines.lm = lm(nox ~ bs(dis, df=4), data=Boston)
+summary(splines.lm)
+```
+
+### Task e)
+
+Here are plots of splines with degrees of freedom 3 to 12. The residual sums of squares are at the bottom of each plot. The final plot shows the plotted RSS values for each model. The RSS values decrease almost monotonically through d=14, and then it levels off.
+
+```{r ch7e9te}
+rss = rep(0, 15)
+
+for(df in 3:17){
+  splines.lm = lm(nox ~ bs(dis, df=df), data=Boston)
+  preds = predict(splines.lm, newdata=list(dis = dis.grid), se=TRUE)
+  plot(dis, nox, xlim=dislims, cex =.5, col="darkgrey")
+  title(paste0("Regression Spline with df=", df))
+  title(sub=paste0("RSS=", sum(splines.lm$residuals^2)))
+  lines(dis.grid, preds$fit, lwd=2,col="blue")
+  rss[df-2] = sum(splines.lm$residuals^2)
+}
+df = seq(3,17)
+plot(df, rss)
+```
+
+### Task f)
+
+The splines models with df=3 and df=4 have far higher cross-validation errors than all the other models. Ignoring these two models, there is actually a general increase in cross-validation error as degrees of freedom increase.
+
+The model with df=10 has the lowest cross-validation error at 0.003647312, so we choose that one as the best.
+
+```{r ch7e9tf, message=FALSE, warning=FALSE}
+set.seed(0)
+cv.error = rep(0, 10)
+
+for (df in 3:17){
+  splines.lm = glm(nox ~ bs(dis, df=df), data=Boston)
+  cv.error[df-2] = cv.glm(Boston, splines.lm, K=10)$delta[1]
+}
+cv.error
+df = seq(3,17,1)
+plot(df, cv.error)
+```
+
+
+# Week 7 Exercises:
+
+## Chapter 8 - Exercise 9
+
+### Task a)
+
+```{r ch8e9ta}
+set.seed(471)
+
+training.indices = sample(dim(OJ)[1], 800)
+
+OJ.train = OJ[training.indices,]
+OJ.test = OJ[-training.indices,]
+```
+
+### Task b)
+
+```{r ch8e9tb}
+tree.Purchase = tree(Purchase ~ ., OJ.train)
+summary(tree.Purchase)
+```
+
+This tree has 9 terminal nodes and a misclassification error rate of 141 / 800 = 17.62%.
+
+### Task c)
+
+```{r ch8e9tc}
+print(tree.Purchase)
+```
+
+Concerning terminal node number 24, the split criterion is having `PriceDiff` under -0.34, which classifies a purchase as being Minute Maid (`MM`). There are 14 observations in this branch, with a deviance of 7.205. Whereas 92.857% of observations in this branch are indeed Minute Maid, 7.143% of them are not.
+
+### Task d)
+
+```{r ch8e9td}
+plot(tree.Purchase)
+text(tree.Purchase)
+```
+
+This tree relies entirely on `LoyalCH` and `PriceDiff`. The left branch solely leads to a result of `Purchase` = `MM`, and it has 4 terminal nodes. The right branch involves `PriceDiff` the most, but overall, `LoyalCH` is clearly the most important variable in this tree.
+
+### Task e)
+
+Here we use the tree to classify the test observations and produce a confusion matrix of the results.
+
+```{r ch8e9te}
+OJ.test.pred = predict(tree.Purchase, OJ.test, type="class")
+table(OJ.test$Purchase, OJ.test.pred)
+```
+
+There is a test error rate of (34+18)/(153+18+34+65) = 19.26%.
+
+### Task f)
+
+```{r ch8e9tf}
+set.seed(471)
+cv.OJ = cv.tree(tree.Purchase, FUN = prune.misclass)
+cv.OJ
+```
+
+### Task g)
+
+```{r ch8e9tg}
+plot(cv.OJ$size, cv.OJ$dev, type="b")
+```
+
+### Task h)
+
+According to these results, a tree with 2 terminal nodes results in the lowest classification error rate, with 163 classification errors.
+
+### Task i)
+
+```{r ch8e9ti}
+prune.OJ = prune.misclass(tree.Purchase, best=2)
+plot(prune.OJ)
+text(prune.OJ, pretty = 0)
+```
+
+### Task j)
+
+```{r ch8e9tj}
+summary(prune.OJ)
+```
+
+Whereas the unpruned tree had a training error rate of 141 / 800 = 17.62%, the pruned tree had a higher training error rate of 153 / 800 = 19.12%.
+
+### Task k)
+
+```{r ch8e9tk}
+pruned.test.pred = predict(prune.OJ, OJ.test, type="class")
+table(OJ.test$Purchase, pruned.test.pred)
+round((37+16)/(155+16+37+62)*100, 2)
+```
+
+Whereas the unpruned tree had a test error rate of 19.26%, the pruned tree had a higher test error rate of 19.63%.
+
+Overall, it seemed that the complexity of the unpruned tree added predictive value.
+
+
+# Week 9 Homework: the `Khan` data set
+
+## Overview
+
+We'll use the training set to develop a favorite random forest model and a favorite tree boosting model. Then we'll compare the two.
+
+## Random Forest
+
+First, we will cycle through random forests with the hyperparameter `mtry` from 1 to 100. The output below indicates the classification error percentage for each `mtry` value from 1-100.
+
+```{r khan1, message=FALSE, warning=FALSE}
+attach(Khan)
+set.seed(0)
+
+class.err = rep(NA, 50)
+for(mtry in 1:100)
+{
+  rf.khan = randomForest(x=xtrain, y=as.factor(ytrain), mtry=mtry)
+  class.err[mtry] = sum(as.numeric(rf.khan$predicted != ytrain))/63
+}
+cbind(mtry=1:100, class.err)
+```
+
+As we can see, the training data classifies perfectly when `mtry` is 8, 14, and most `mtry` values from 24 and onward.
+
+Since there are so many candidates, we'll perform cross-validation for each of these 100 random forests.
+
+```{r caret}
+xtrain.mtx = as.matrix(xtrain)
+colnames(xtrain.mtx) = make.names(1:2308, unique=T)
+
+ytrain.releveled = as.factor(ytrain)
+levels(ytrain.releveled) <- c("Type1", "Type2", "Type3", "Type4")
+
+cvCtrl = trainControl(method="repeatedcv", number=5, repeats=4, classProbs=TRUE)
+
+set.seed(0)
+
+cv.rf.khan = train(x=xtrain.mtx, y=ytrain.releveled, trControl=cvCtrl, 
+                   tuneGrid=data.frame(mtry=1:100), method="rf", ntree=500)
+cv.rf.khan
+plot(cv.rf.khan)
+```
+
+The models with `mtry` being 63 reported perfect accuracy with cross-validation. We therefore choose this model as our best random forest.
+
+## Tree Boosting
+
+First, we'll use the defaults of the `gbm` function arbitrarily, trying a tree-boosting model with 100 trees, an interaction depth of 1, a shrinkage of 0.001, and a minimum number of 10 observations in the terminal node. We'll see how well it classifies the training data.
+
+```{r boosting}
+train = data.frame(cbind("Y"=ytrain, xtrain.mtx))
+train$Y = as.factor(train$Y)
+
+set.seed(471)
+boost.khan = gbm(Y ~ ., data=train, distribution="multinomial",
+                 n.trees=100, interaction.depth=1,
+                 shrinkage=0.001, n.minobsinnode = 10)
+
+pred.probs = predict(boost.khan, train[,-1], n.trees=100, type="response")
+
+boost.khan.pred = rep(NA,0,63)
+for(x in 1:63){
+  boost.khan.pred[x] = which.max(pred.probs[x,,1])
+}
+sum(as.numeric(as.factor(ytrain) != boost.khan.pred))/63
+```
+
+This tree boosting model had zero training errors. Instead of blindly guessing and checking to see what other models might result in zero training errors, we will cross-validate this model along with other possible models.
+
+We will go no further than an interaction depth of 1, since our first model had no training errors with an interaction depth of 1. 
+
+We will try forests of 25, 50, 100, and 150 trees. We'll try shrinkage values of 0.0001, 0.001, 0.01, 0.1, and 0.2. We'll use a range of minimum numbers of observations in the terminal node: 2, 5, and 10.
+
+Displayed below is a graph of cross-validation accuracy for the different models that the `train` function tries out, followed by what the function deems the optimal model.
+
+```{r boost_cv}
+ctr = trainControl(method="cv", number=10) ## 10-fold CV
+
+mygrid = expand.grid(n.trees=c(25,50,100,150), interaction.depth=1,
+                     shrinkage=c(0.0001,0.001,0.01,0.1,0.2),
+                     n.minobsinnode=c(2, 5, 10))
+
+set.seed(471)
+boost.caret = train(x=xtrain.mtx, y=ytrain.releveled, trControl=ctr,
+                    method='gbm',
+                    tuneGrid=mygrid,
+                    preProc=c('center','scale'), verbose=F)
+
+boost.caret
+plot(boost.caret)
+boost.caret$bestTune
+```
+
+We see that the vast majority of tree boosting models had perfect validation accuracy, and the procedure chose the smallest possible hyperparameters as the best model! We'll run cross-validation again with even smaller hyperparameter choices.
+
+```{r boost_cv_2}
+mygrid = expand.grid(n.trees=c(1,2,5,25,50), interaction.depth=1,
+                     shrinkage=c(0.00001,0.0001,0.001,0.01),
+                     n.minobsinnode=c(1,2))
+
+set.seed(471)
+boost.caret = train(x=xtrain.mtx, y=ytrain.releveled, trControl=ctr,
+                    method='gbm',
+                    tuneGrid=mygrid,
+                    preProc=c('center','scale'), verbose=F)
+
+boost.caret
+plot(boost.caret)
+boost.caret$bestTune
+```
+
+We'll do one more round of cross-validation to really fine-tune these hyperparameters to get the simplest model that has perfect cross-validation accuracy.
+
+```{r boost_cv_3}
+mygrid = expand.grid(n.trees=c(1,2,3,4,5), interaction.depth=1,
+                     shrinkage=c(0.00005,0.000075,0.0001,0.0005),
+                     n.minobsinnode=1)
+
+set.seed(471)
+boost.caret = train(x=xtrain.mtx, y=ytrain.releveled, trControl=ctr,
+                    method='gbm',
+                    tuneGrid=mygrid,
+                    preProc=c('center','scale'), verbose=F)
+
+boost.caret
+plot(boost.caret)
+boost.caret$bestTune
+```
+
+We've finally arrived at a result that is cleary superior to all simpler models. We will select the hyperparameters above as our best tree boosting model.
+
+## Test error of each model
+
+Here we compute the number of test errors for our cross-validated random forest model with `mtry` = 63. 
+
+Below is the number of test errors followed by a table of the actual and predicted values as a sanity check.
+
+```{r test_error_random_forest}
+rf.test.pred = predict(cv.rf.khan$finalModel, xtest)
+
+sum(as.numeric(as.numeric(rf.test.pred) != ytest))
+cbind(ytest, rf.test.pred)
+```
+
+There were 2 test errors, for a test error rate of 2/20 = 10%.
+
+Now we'll compute the number of test errors for our cross-validated random forest boosting model. 
+
+Again, below is the number of test errors followed by a table of the actual and predicted values as a sanity check.
+
+```{r test_error_boost}
+boost.test.probs = predict(boost.caret$finalModel, xtest, type="response",
+                           n.trees=boost.caret$finalModel$n.trees)
+boost.test.pred  = rep(NA,0,20)
+for(x in 1:20){
+  boost.test.pred[x] = which.max(boost.test.probs[x,,1])
+}
+
+sum(as.numeric(ytest != boost.test.pred))
+cbind(ytest, boost.test.pred)
+```
+
+There were 3 testing errors, meaning that our final boosting model had a test error rate of 3/20 = 15%, as opposed to our random forest's test error rate of 2/20 = 10%.
+
+Therefore, our best model is our random forest with the hyperparameter `mtry` equal to 63.
+
+
+# Week 10 homework
+
+## Chapter 9 - Exercise 8
+
+### Task a)
+
+```{r ch9e8ta}
+set.seed(2018)
+
+training.indices = sample(dim(OJ)[1], 800)
+
+OJ.train = OJ[training.indices,]
+OJ.test = OJ[-training.indices,]
+```
+
+### Task b)
+
+```{r ch9e8tb}
+svm.OJ = svm(Purchase ~ ., OJ.train, kernel ="linear", cost=0.01, scale=F)
+summary(svm.OJ)
+```
+
+The summary tells us that a linear kernel was used with `cost=0.01` and `gamma=0.05555556`. There are 616 support vectors: 309 in the CH level and 307 in MM.
+
+### Task c)
+
+```{r ch9e8tc_train}
+svm.train.pred = predict(svm.OJ, OJ.train)
+sum(as.numeric(OJ.train$Purchase != svm.train.pred))/nrow(OJ.train)
+```
+
+The training error rate is 29.25%.
+
+```{r ch9e8tc_test}
+svm.test.pred  = predict(svm.OJ, OJ.test)
+sum(as.numeric(OJ.test$Purchase != svm.test.pred))/nrow(OJ.test)
+```
+
+The test error rate is slightly worse at 30.74074%.
+
+### Task d)
+
+```{r ch9e8td}
+set.seed(2018)
+OJ.svm.tune = tune(svm, Purchase ~ ., data=OJ.train, kernel = "linear",
+     ranges=list(cost=c(0.001, 0.01, 0.1, 1, 5, 10)))
+OJ.svm.tune
+```
+
+The optimal cost turns out to be 0.1.
+
+### Task e)
+
+```{r ch9e8te_train}
+svm.train.pred = predict(OJ.svm.tune$best.model, OJ.train)
+sum(as.numeric(OJ.train$Purchase != svm.train.pred))/nrow(OJ.train)
+```
+
+With `cost=0.1`, the training error rate has improved to 15.75%
+
+```{r ch9e8te_test}
+svm.test.pred  = predict(OJ.svm.tune$best.model, OJ.test)
+test.err.linear = sum(as.numeric(OJ.test$Purchase != svm.test.pred))/nrow(OJ.test)
+test.err.linear
+```
+
+The test error rate also improved to 17.03704%.
+
+### Task f)
+
+```{r ch9e8tf}
+svm.OJ = svm(Purchase ~ ., OJ.train, kernel="radial", cost=0.01, scale=F)
+summary(svm.OJ)
+```
+
+The summary tells us that a radial kernel was used with `cost=0.01` and `gamma=0.05555556`. There are 627 support vectors: 320 in the CH level and 307 in MM.
+
+```{r ch9e8tf_train}
+svm.train.pred = predict(svm.OJ, OJ.train)
+sum(as.numeric(OJ.train$Purchase != svm.train.pred))/nrow(OJ.train)
+```
+
+The training error rate is 38.375%.
+
+```{r ch9e8tf_test}
+svm.test.pred  = predict(svm.OJ, OJ.test)
+sum(as.numeric(OJ.test$Purchase != svm.test.pred))/nrow(OJ.test)
+```
+
+The test error rate is slightly worse at 40.74074%.
+
+```{r ch9e8tf_cv}
+set.seed(2018)
+OJ.svm.tune = tune(svm, Purchase ~ ., data=OJ.train, kernel = "radial",
+     ranges=list(cost=c(0.001, 0.01, 0.1, 1, 5, 10)))
+OJ.svm.tune
+```
+
+The optimal cost turns out to be 1.
+
+```{r ch9e8tf_train_err}
+svm.train.pred = predict(OJ.svm.tune$best.model, OJ.train)
+sum(as.numeric(OJ.train$Purchase != svm.train.pred))/nrow(OJ.train)
+```
+
+With `cost=1`, the training error rate has improved to 14.25%
+
+```{r ch9e8tf_test_err}
+svm.test.pred  = predict(OJ.svm.tune$best.model, OJ.test)
+test.err.radial = sum(as.numeric(OJ.test$Purchase != svm.test.pred))/nrow(OJ.test)
+test.err.radial
+```
+
+The test error rate also improved to 17.40741%.
+
+### Task g)
+
+```{r ch9e8tg}
+svm.OJ = svm(Purchase ~ ., OJ.train, kernel="polynomial", cost=0.01, degree=2, scale=F)
+summary(svm.OJ)
+```
+
+The summary tells us that a polynomial kernel was used with `cost=0.01` and `gamma=0.05555556`. There are 344 support vectors: 173 in the CH level and 171 in MM.
+
+```{r ch9e8tg_train}
+svm.train.pred = predict(svm.OJ, OJ.train)
+sum(as.numeric(OJ.train$Purchase != svm.train.pred))/nrow(OJ.train)
+```
+
+The training error rate is 15.875%.
+
+```{r ch9e8tg_test}
+svm.test.pred  = predict(svm.OJ, OJ.test)
+sum(as.numeric(OJ.test$Purchase != svm.test.pred))/nrow(OJ.test)
+```
+
+The test error rate is slightly worse at 17.03704%.
+
+```{r ch9e8tg_cv}
+set.seed(2018)
+OJ.svm.tune = tune(svm, Purchase ~ ., data=OJ.train, kernel = "polynomial", degree=2,
+     ranges=list(cost=c(0.001, 0.01, 0.1, 1, 5, 10)))
+OJ.svm.tune
+```
+
+The optimal cost turns out to be 10.
+
+```{r ch9e8tg_train_err}
+svm.train.pred = predict(OJ.svm.tune$best.model, OJ.train)
+sum(as.numeric(OJ.train$Purchase != svm.train.pred))/nrow(OJ.train)
+```
+
+With `cost=10`, the training error rate has improved to 14.375%
+
+```{r ch9e8tg_test_err}
+svm.test.pred  = predict(OJ.svm.tune$best.model, OJ.test)
+test.err.poly = sum(as.numeric(OJ.test$Purchase != svm.test.pred))/nrow(OJ.test)
+test.err.poly
+```
+
+The test error rate also improved to 18.14815%.
+
+### Task h)
+
+We should really only care about the test error rates after the cost parameter was chosen through cross-validation:
+
+```{r ch9e8th}
+cbind(Kernel = c("Linear", "Radial", "Polynomial"),
+      Test.error.rate = c(paste0(round(test.err.linear*100, 2),"%"), 
+                          paste0(round(test.err.radial*100, 2),"%"),
+                          paste0(round(test.err.poly*100, 2),"%")))
+```
+
+Therefore, the linear kernel gave us the best results for these data.
